@@ -111,7 +111,7 @@ function summaryPrompt(transcript: string) {
     "Summarize this YouTube transcript.",
     "Write a tl;dr of at most 3 sentences, then 3 to 7 topic sections, each with a short title and a 1-3 sentence summary.",
     "Group the transcript's own content; do not invent details.",
-    "Write in the transcript's language. Plain text only: no markdown, no bullet characters, no timestamps.",
+    "Write in the transcript's language. Report that language as an ISO 639-1 code in the language field (e.g. \"en\", \"de\"). Plain text only: no markdown, no bullet characters, no timestamps.",
     "",
     "Transcript:",
     transcript,
