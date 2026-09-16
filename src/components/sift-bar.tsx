@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,9 +19,10 @@ import type { SummaryEvent, SummaryPartial, SummarySource } from "@/lib/summary"
 
 type Phase = "captions" | "summary" | "streaming" | "done";
 
-export function SiftBar() {
+export function SiftBar({ savedVideoIds }: { savedVideoIds: string[] }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState<string | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
 
   function sift(event: FormEvent) {
@@ -28,9 +30,16 @@ export function SiftBar() {
     const id = youtubeVideoId(url);
     if (!id) {
       setError("Paste a YouTube video URL (watch, youtu.be, shorts or embed).");
+      setDuplicate(null);
+      return;
+    }
+    if (savedVideoIds.includes(id)) {
+      setError(null);
+      setDuplicate(id);
       return;
     }
     setError(null);
+    setDuplicate(null);
     setVideoId(id);
   }
 
@@ -45,24 +54,82 @@ export function SiftBar() {
           aria-invalid={error !== null}
         />
         {error ? <p className="mt-1 text-sm text-destructive">{error}</p> : null}
+        {duplicate ? (
+          <p className="mt-1 text-sm text-muted-foreground">
+            Already generated —{" "}
+            <a href={`#sift-${duplicate}`} className="underline">
+              view sift
+            </a>
+          </p>
+        ) : null}
       </div>
-      <Button type="submit">Sift</Button>
+      <Button type="submit" disabled={duplicate !== null}>
+        Sift
+      </Button>
       {videoId ? (
         <SiftDialog
           key={videoId}
           videoId={videoId}
-          onClose={() => setVideoId(null)}
+          alreadySaved={savedVideoIds.includes(videoId)}
+          onClose={() => {
+            setVideoId(null);
+            setUrl("");
+          }}
         />
       ) : null}
     </form>
   );
 }
 
-function SiftDialog({ videoId, onClose }: { videoId: string; onClose: () => void }) {
+function SiftDialog({
+  videoId,
+  alreadySaved,
+  onClose,
+}: {
+  videoId: string;
+  alreadySaved: boolean;
+  onClose: () => void;
+}) {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("captions");
   const [source, setSource] = useState<SummarySource | null>(null);
   const [summary, setSummary] = useState<SummaryPartial | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [save, setSave] = useState<"idle" | "saving" | "saved" | "error">(
+    alreadySaved ? "saved" : "idle",
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function saveSummary() {
+    if (!summary) return;
+    setSave("saving");
+    try {
+      const response = await fetch("/api/summaries", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          url: `https://www.youtube.com/watch?v=${videoId}`,
+          summary,
+          source: source ?? "captions",
+        }),
+      });
+      if (response.status === 409) {
+        setSave("error");
+        setSaveError("Already generated.");
+        return;
+      }
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error ?? `Save failed (${response.status}).`);
+      }
+      setSave("saved");
+      router.refresh();
+      onClose();
+    } catch (cause) {
+      setSave("error");
+      setSaveError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -172,6 +239,28 @@ function SiftDialog({ videoId, onClose }: { videoId: string; onClose: () => void
                 </section>
               ) : null,
             )}
+          </div>
+        ) : null}
+
+        {phase === "done" && error === null ? (
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={saveSummary}
+              disabled={save === "saving" || save === "saved"}
+            >
+              {save === "saving" ? (
+                <>
+                  <Spinner /> Saving…
+                </>
+              ) : save === "saved" ? (
+                "Saved"
+              ) : (
+                "Save"
+              )}
+            </Button>
+            {save === "error" ? (
+              <span className="text-sm text-destructive">{saveError}</span>
+            ) : null}
           </div>
         ) : null}
       </DialogContent>
