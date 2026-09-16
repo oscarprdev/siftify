@@ -26,15 +26,3 @@ export function youtubeVideoId(input: string): string | null {
 }
 
 export type TranscriptSegment = { startSec: number; text: string };
-
-/** `m:ss`, or `h:mm:ss` past the hour. */
-export function formatTimestamp(startSec: number) {
-  const total = Math.max(0, Math.floor(startSec));
-  const [h, m, s] = [
-    Math.floor(total / 3600),
-    Math.floor((total % 3600) / 60),
-    total % 60,
-  ];
-  const mm = h ? String(m).padStart(2, "0") : String(m);
-  return `${h ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
-}

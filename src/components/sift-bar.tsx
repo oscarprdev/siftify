@@ -11,14 +11,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { formatTimestamp, youtubeVideoId, type TranscriptSegment } from "@/lib/youtube";
+import { youtubeVideoId } from "@/lib/youtube";
+import type { SummaryEvent, SummaryPartial, SummarySource } from "@/lib/summary";
 
-type Result = { source: "captions" | "whisper"; segments: TranscriptSegment[] };
-type Status =
-  | { state: "loading" }
-  | { state: "done"; result: Result }
-  | { state: "error"; message: string };
+type Phase = "captions" | "summary" | "streaming" | "done";
 
 export function SiftBar() {
   const [url, setUrl] = useState("");
@@ -61,14 +59,31 @@ export function SiftBar() {
 }
 
 function SiftDialog({ videoId, onClose }: { videoId: string; onClose: () => void }) {
-  const [status, setStatus] = useState<Status>({ state: "loading" });
+  const [phase, setPhase] = useState<Phase>("captions");
+  const [source, setSource] = useState<SummarySource | null>(null);
+  const [summary, setSummary] = useState<SummaryPartial | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
+    function handle(event: SummaryEvent) {
+      if (event.type === "captions-ready") {
+        setSource(event.source);
+        setPhase("summary");
+      } else if (event.type === "summary-start") {
+        setPhase("summary");
+      } else if (event.type === "partial") {
+        setSummary(event.summary);
+        setPhase("streaming");
+      } else {
+        setError(event.message);
+      }
+    }
+
     async function sift() {
       try {
-        const response = await fetch("/api/transcript", {
+        const response = await fetch("/api/summarize", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -76,17 +91,30 @@ function SiftDialog({ videoId, onClose }: { videoId: string; onClose: () => void
           }),
           signal: controller.signal,
         });
-        const data = await response.json().catch(() => null);
         if (!response.ok) {
+          const data = await response.json().catch(() => null);
           throw new Error(data?.error ?? `Request failed (${response.status}).`);
         }
-        setStatus({ state: "done", result: data });
+        if (!response.body) throw new Error("The server sent no summary stream.");
+
+        // NDJSON: one event per line, split across chunk boundaries.
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line) handle(JSON.parse(line) as SummaryEvent);
+          }
+        }
+        setPhase("done");
       } catch (cause) {
         if (controller.signal.aborted) return;
-        setStatus({
-          state: "error",
-          message: cause instanceof Error ? cause.message : String(cause),
-        });
+        setError(cause instanceof Error ? cause.message : String(cause));
       }
     }
 
@@ -94,43 +122,57 @@ function SiftDialog({ videoId, onClose }: { videoId: string; onClose: () => void
     return () => controller.abort();
   }, [videoId]);
 
+  const busy = (phase === "captions" || phase === "summary") && error === null;
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Sift</DialogTitle>
           <DialogDescription>
-            {status.state === "done"
-              ? `${videoId} — from YouTube ${status.result.source}.`
+            {source
+              ? `${videoId} — from YouTube ${source}.`
               : `${videoId} — captions first, whisper if the video has none.`}
           </DialogDescription>
         </DialogHeader>
 
-        {status.state === "loading" ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner />
-            Sifting. Long videos can take minutes.
-          </p>
+        {busy ? (
+          <div className="space-y-3">
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              {phase === "captions"
+                ? "Generating captions — long videos can take minutes."
+                : "Generating summary"}
+            </p>
+            <div className="space-y-2" aria-hidden>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          </div>
         ) : null}
 
-        {status.state === "error" ? (
+        {error ? (
           <Alert variant="destructive">
             <AlertTitle>Sift failed</AlertTitle>
-            <AlertDescription>{status.message}</AlertDescription>
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
 
-        {status.state === "done" ? (
-          <ol className="max-h-[60vh] space-y-2 overflow-y-auto text-sm">
-            {status.result.segments.map((segment, index) => (
-              <li key={index} className="flex gap-3">
-                <span className="shrink-0 tabular-nums text-muted-foreground">
-                  {formatTimestamp(segment.startSec)}
-                </span>
-                <span>{segment.text}</span>
-              </li>
-            ))}
-          </ol>
+        {summary ? (
+          <div className="max-h-[60vh] space-y-4 overflow-y-auto text-sm">
+            {summary.tldr ? <p className="font-medium">{summary.tldr}</p> : null}
+            {summary.topics?.map((topic, index) =>
+              topic ? (
+                <section key={index} className="space-y-1">
+                  {topic.title ? <h3 className="font-medium">{topic.title}</h3> : null}
+                  {topic.summary ? (
+                    <p className="text-muted-foreground">{topic.summary}</p>
+                  ) : null}
+                </section>
+              ) : null,
+            )}
+          </div>
         ) : null}
       </DialogContent>
     </Dialog>
