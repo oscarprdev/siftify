@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { SignOutButton } from "./sign-out-button";
+import { SiftBar } from "@/components/sift-bar";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -15,8 +16,14 @@ export default async function Home() {
   const session = await auth.api.getSession({ headers: await headers() });
 
   return (
-    <main className="flex flex-1 items-center justify-center bg-muted/30 p-8">
-      <Card className="w-full max-w-sm">
+    <main className="flex flex-1 flex-col gap-6 bg-muted/30 p-8">
+      <div className="flex justify-end">
+        <div className="w-full max-w-2xl">
+          <SiftBar />
+        </div>
+      </div>
+      <div className="flex flex-1 items-center justify-center">
+        <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>
             <h1>My ADE</h1>
@@ -44,7 +51,8 @@ export default async function Home() {
             </>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </main>
   );
 }
