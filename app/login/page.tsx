@@ -1,9 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+
+// OAuth callback failures redirect back here with ?error=&error_description=.
+function OAuthError() {
+  const params = useSearchParams();
+  const code = params.get("error");
+
+  useEffect(() => {
+    if (code) window.history.replaceState(null, "", window.location.pathname);
+  }, [code]);
+
+  if (!code) return null;
+  const description = params.get("error_description");
+  return (
+    <p className="mt-4 text-sm text-red-600 dark:text-red-400">
+      {description ||
+        (code === "access_denied"
+          ? "GitHub sign in was cancelled"
+          : `GitHub sign in failed (${code})`)}
+    </p>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,6 +53,7 @@ export default function LoginPage() {
     const { error } = await authClient.signIn.social({
       provider: "github",
       callbackURL: "/",
+      errorCallbackURL: "/login",
     });
     if (error) setError(error.message ?? "GitHub sign in failed");
   }
@@ -79,6 +101,10 @@ export default function LoginPage() {
         >
           Sign in with GitHub
         </button>
+
+        <Suspense fallback={null}>
+          <OAuthError />
+        </Suspense>
 
         {error ? (
           <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
